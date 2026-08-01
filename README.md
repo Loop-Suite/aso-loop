@@ -7,6 +7,21 @@ LLM 백엔드는 Claude Code CLI(`claude -p`) 서브프로세스. 별도 API 키
 아키텍처를 그대로 가져와 ASO(App Store Optimization) 도메인으로 이식했다. `claude -p` 호출 방식, 스레드 분리 stdin/stdout 처리, JSON 스키마 강제,
 de-anchoring/held-out gate 등 채점 메커니즘은 원본과 동일하다. 도메인 로직(스펙 필드, 결정론적 검사, 프롬프트)만 새로 작성했다.
 
+## Pipeline
+
+```mermaid
+flowchart LR
+    A["brief + spec (apple/google)"] --> B["generate.rs: N angle-varied drafts"]
+    B --> C["checks.rs: char/byte limits, keyword coverage,<br/>cross-field dedup, banned/superlative terms"]
+    C --> D["score.rs: LLM rubric<br/>multiple judge models/rounds"]
+    D --> E["trimmed-mean aggregation per criterion"]
+    E --> F{"loop mode?"}
+    F -->|"gen"| G["best.md + ranked runs"]
+    F -->|"loop, target score"| H["feedback → regenerate<br/>until target / max-iter"]
+    H --> B
+    G --> I["held-out gate model re-scores<br/>first vs. best (reward-hacking check)"]
+```
+
 ## 요구사항
 
 - Rust 1.70+
