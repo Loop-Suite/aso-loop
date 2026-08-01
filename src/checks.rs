@@ -32,8 +32,10 @@ pub struct Metrics {
     pub banned_hits: Vec<String>,
 }
 
+/// 헤딩 비교용 정규화: 영숫자만 남기고 소문자화(LLM이 `## Title`/`## TITLE`처럼
+/// 대소문자를 다르게 낼 수 있어 대소문자 구분 없이 매칭한다).
 fn norm_head(s: &str) -> String {
-    s.chars().filter(|c| !c.is_whitespace()).collect()
+    s.chars().filter(|c| c.is_alphanumeric()).collect::<String>().to_lowercase()
 }
 
 /// `#`로 시작하는 헤딩 기준으로 (헤딩, 본문) 분할. (bizplan-loop 구조 재사용)
@@ -66,9 +68,10 @@ pub fn field_bodies(spec: &Spec, doc: &str) -> BTreeMap<String, String> {
     let mut map = BTreeMap::new();
     for s in &spec.sections {
         let want = norm_head(&s.title);
-        if let Some((_, body)) = secs.iter().find(|(h, _)| {
-            !h.is_empty() && (norm_head(h).contains(&want) || (want.contains(&norm_head(h)) && !h.is_empty()))
-        }) {
+        // 정확 일치(영숫자+대소문자 정규화 후)만 매칭한다. 이전에는 양방향 substring
+        // 포함 검사를 썼는데, "Subtitle"이 "Title"을 문자 그대로 포함하는 식의
+        // 필드명 충돌이 있어 잘못된 필드에 매칭되는 버그가 있었다.
+        if let Some((_, body)) = secs.iter().find(|(h, _)| !h.is_empty() && norm_head(h) == want) {
             map.insert(s.id.clone(), body.trim().to_string());
         }
     }
@@ -156,8 +159,8 @@ fn duplicate_keywords_across_fields(spec: &Spec, bodies: &BTreeMap<String, Strin
         let normalized = normalize_text_for_match(&body);
         let mut seen_in_field = HashSet::new();
         for tok in normalized.split(' ') {
-            if tok.len() < 2 {
-                continue; // 조사·단일문자 노이즈 제외
+            if tok.chars().count() < 2 {
+                continue; // 조사·단일문자 노이즈 제외 (char 기준 — byte 기준이면 한글 1글자가 안 걸러짐)
             }
             if seen_in_field.insert(tok.to_string()) {
                 *token_field_count.entry(tok.to_string()).or_insert(0) += 1;
@@ -352,11 +355,36 @@ mod tests {
     }
 
     #[test]
-    fn format_issues_flags_banned_term_and_duplicate_keyword() {
+    fn format_issues_flags_duplicate_keyword() {
         let spec = test_spec();
         let doc = "## Title\n가계부\n## Subtitle\n가계부 앱\n";
         let issues = format_issues(&spec, doc);
         assert!(issues.iter().any(|i| i.contains("중복")));
+    }
+
+    #[test]
+    fn format_issues_flags_banned_term() {
+        let spec = test_spec();
+        let doc = "## Title\n뱅크샐러드 대비 더 쉬운 가계부\n## Subtitle\n간편 가계부\n";
+        let issues = format_issues(&spec, doc);
+        assert!(issues.iter().any(|i| i.contains("금지 표현") && i.contains("뱅크샐러드")), "{issues:?}");
+    }
+
+    #[test]
+    fn norm_head_is_case_insensitive() {
+        assert_eq!(norm_head("## Title"), norm_head("## TITLE"));
+    }
+
+    #[test]
+    fn format_issues_boundary_exact_max_chars_ok_but_plus_one_fails() {
+        let spec = test_spec(); // title max_chars = 10
+        let ok_doc = "## Title\n1234567890\n## Subtitle\n가나\n"; // 정확히 10자
+        let issues_ok = format_issues(&spec, ok_doc);
+        assert!(!issues_ok.iter().any(|i| i.contains("Title") && i.contains("초과")), "{issues_ok:?}");
+
+        let over_doc = "## Title\n12345678901\n## Subtitle\n가나\n"; // 11자
+        let issues_over = format_issues(&spec, over_doc);
+        assert!(issues_over.iter().any(|i| i.contains("Title") && i.contains("초과")), "{issues_over:?}");
     }
 
     #[test]

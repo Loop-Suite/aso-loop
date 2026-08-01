@@ -182,7 +182,22 @@ pub fn score_doc(judges: &[Llm], spec: &Spec, label: &str, doc: &str, rounds: us
     let format_issues = checks::format_issues(spec, doc);
     let missing = checks::missing_required(spec, doc);
 
+    // 심사위원이 특정 criterion id를 한 번도 반환하지 않으면(스키마상 막지 못함)
+    // 해당 항목이 조용히 0점 처리되므로 명시적으로 경고한다.
+    let unscored: Vec<&str> = spec
+        .criteria
+        .iter()
+        .filter(|c| raw.get(&c.id).map(|v| v.is_empty()).unwrap_or(true))
+        .map(|c| c.id.as_str())
+        .collect();
+
     let mut improvements: Vec<String> = format_issues.clone();
+    if !unscored.is_empty() {
+        improvements.push(format!(
+            "[채점 경고] 심사위원이 다음 항목에 점수를 한 번도 반환하지 않아 0점 처리됨(재채점 권장): {}",
+            unscored.join(", ")
+        ));
+    }
     for r in &results {
         for imp in &r.improvements {
             let t = imp.trim().to_string();

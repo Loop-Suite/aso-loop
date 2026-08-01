@@ -117,6 +117,17 @@ impl Spec {
         let n = ids.len();
         ids.dedup();
         anyhow::ensure!(ids.len() == n, "criteria id 중복");
+        let bad: Vec<&str> = spec
+            .banned_terms
+            .iter()
+            .map(|s| s.as_str())
+            .filter(|p| regex::RegexBuilder::new(p).case_insensitive(true).build().is_err())
+            .collect();
+        anyhow::ensure!(
+            bad.is_empty(),
+            "banned_terms에 컴파일 불가능한 정규식이 있음: {} — 조용히 무시되면 해당 금지어 검사가 사라지므로 사전에 막는다",
+            bad.join(", ")
+        );
         Ok(spec)
     }
 
