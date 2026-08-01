@@ -1,0 +1,82 @@
+name = "MoneyFlow — 가계부 앱 (Google Play 예시 스펙)"
+store = "google"
+context = """
+1인 가구·프리랜서를 타겟으로 한 자동 가계부 앱. 은행·카드 연동 자동 분류가 핵심 기능이고,
+경쟁 앱 대비 수동 입력 없이 지출 패턴을 시각화하는 점이 차별점이다.
+"""
+scoring_source = "가중치는 aso-loop 기본 루브릭(키워드 적합성 0.30 / 전환 카피 0.25 / 현지화 품질 0.15 / 가독성·비스터핑 0.15 / 정책 준수 0.15)을 그대로 사용."
+
+target_keywords = ["가계부", "자동가계부", "지출관리", "예산관리", "카드내역", "소비패턴"]
+
+banned_terms = ["뱅크샐러드", "토스\\s*가계부", "브로콜리"]
+
+emoji_max = 2
+
+angles = [
+  "자동 분류·연동 편의성을 전면에 세운다.",
+  "지출 시각화·인사이트 기능을 전면에 세운다.",
+  "1인 가구·프리랜서 타겟의 공감 포인트를 전면에 세운다.",
+]
+
+# Google Play는 별도 keywords 필드가 없다 — title/short_description/long_description
+# 자체에 키워드가 자연스럽게 녹아 있어야 검색 알고리즘이 인식한다. 그래서 Apple 스펙과
+# 달리 keyword_dedup_target을 어떤 필드에도 설정하지 않았다(필드 간 자동 dedup이 없으므로
+# 중복이 오히려 키워드 밀도에 도움이 될 수 있음 — 단, readability_no_stuffing 항목이
+# 과도한 반복은 별도로 감점한다).
+
+[[sections]]
+id = "title"
+title = "Title"
+guide = "브랜드명 + 핵심기능 키워드. Google Play는 title도 검색 랭킹에 반영된다."
+max_chars = 30
+min_chars = 15
+required = true
+
+[[sections]]
+id = "short_description"
+title = "Short description"
+guide = "스토어 목록·검색 결과에 노출되는 요약. 첫 문장에 핵심 베네핏."
+max_chars = 80
+min_chars = 40
+required = true
+
+[[sections]]
+id = "long_description"
+title = "Long description"
+guide = """
+상세 설명. 앞부분(약 3~4줄)이 '더보기' 없이 노출되므로 핵심 가치를 앞에 배치.
+Google은 long_description 전체가 키워드 검색 색인 대상이므로 자연스러운 키워드 반복이 Apple보다 유리하다.
+"""
+max_chars = 4000
+min_chars = 1000
+required = true
+
+[[criteria]]
+id = "keyword_relevance"
+name = "키워드 적합성"
+weight = 30
+guide = "target_keywords가 자연스럽게 반영되고, 검색 의도와 실제 기능이 일치하는가"
+
+[[criteria]]
+id = "conversion_copy"
+name = "전환 카피"
+weight = 25
+guide = "검색 결과·상세페이지에서 실제로 탭·설치하게 만드는 후킹력과 베네핏 전달력"
+
+[[criteria]]
+id = "localization_quality"
+name = "현지화 품질"
+weight = 15
+guide = "번역투 없이 자연스러운 한국어 표현, 타겟 사용자층 어휘에 맞는가"
+
+[[criteria]]
+id = "readability_no_stuffing"
+name = "가독성·비스터핑"
+weight = 15
+guide = "키워드를 욱여넣지 않고 읽었을 때 자연스러운가, 문장이 매끄러운가"
+
+[[criteria]]
+id = "compliance"
+name = "정책 준수"
+weight = 15
+guide = "상표권·과장광고·가격문구 등 심사 반려 리스크가 없는가(형식적 금지어 검사는 자동 검사가 처리하므로 내용상 리스크 위주로 평가)"
