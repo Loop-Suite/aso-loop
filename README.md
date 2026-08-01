@@ -114,6 +114,10 @@ guide = "..."
 공식 문서가 명확히 하지 않고, 한글 등 멀티바이트 문자에서 체감 차이가 날 수 있다는 보고가 있음). 이 프로젝트는
 문자 수(`chars().count()`) 기준으로 계산하며, keywords 필드가 상한의 90%를 넘기면 리포트에 `[불확실]` 경고를
 별도로 띄운다 — **실제 등록 전 App Store Connect에서 직접 확인 권장.**
+(정황 근거, 1차 자료 아님: [Apple Developer Forum thread 705360](https://developer.apple.com/forums/thread/705360)에
+태국어 3바이트 문자 100개가 keywords 필드를 통과했다는 실측 보고가 있어 "바이트"보다 "문자 수" 기준일
+가능성을 시사하지만, Apple 공식 OpenAPI 스펙(`AppInfoLocalizationCreateRequest` 등)에는 이 필드의
+`maxLength` 자체가 선언돼 있지 않아 확정할 수 없다.)
 
 ## 오픈소스 출처
 
