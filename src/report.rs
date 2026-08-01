@@ -155,8 +155,10 @@ pub fn write_loop_report(
         ));
         if loop_delta > 0.0 && gate_delta < loop_delta * 0.34 {
             md.push_str(
-                "> ⚠ held-out 개선폭이 루프 개선폭의 1/3 미만 → 채점자 최적화(reward hacking) 의심. \
-                 실제 카피 품질이 올랐는지 사람이 직접 확인할 것.\n\n",
+                "> ⚠ held-out 개선폭이 루프 개선폭의 1/3 미만 → 채점자 간 불일치(다른 프록시로는 재현되지 않는 개선). \
+                 held-out 게이트 모델도 \"정답(gold reward)\"이 아니라 또 다른 프록시일 뿐이므로, 이 불일치가 \
+                 곧 \"실제 카피 품질 하락\"을 뜻하지는 않는다(Gao et al. 2022, arXiv:2210.10760; Laidlaw et al. 2024, \
+                 arXiv:2403.03185). 사람이 직접 확인할 것.\n\n",
             );
         }
     }

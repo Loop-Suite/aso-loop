@@ -41,7 +41,7 @@ pub fn run(gen_llm: &Llm, judges: &[Llm], spec: &Spec, idea: &str, out_dir: &Pat
         let label = format!("iter{:02}", i + 1);
         std::fs::write(out_dir.join(format!("{}.md", label)), &doc)?;
 
-        let s = score::score_doc(judges, spec, &label, &doc, cfg.rounds)?;
+        let s = score::score_doc(judges, spec, &label, &doc, cfg.rounds, Some(idea))?;
         report::append_jsonl(out_dir, &s)?;
         println!(
             "  [{}] {:.1}/100  ({}자{})",
@@ -114,5 +114,68 @@ pub fn run(gen_llm: &Llm, judges: &[Llm], spec: &Spec, idea: &str, out_dir: &Pat
         ));
     }
 
+    // 회차 간 드리프트 지표(Correlated Proxies, arXiv:2403.03185 응용): 점수는 올랐는데
+    // 문서가 이전 회차와 거의 무관하게 바뀌었다면, judge가 "그럴듯함" 패턴에 맞춰 문서를
+    // 갈아엎었을 뿐 실제 개선과는 무관할 위험이 있다 — 길이 canary(분량)와는 독립적으로,
+    // 내용 자체의 변화량을 본다. 길이 canary와 마찬가지로 이건 결정론적 신호일 뿐이고
+    // held-out gate처럼 "무엇이 옳은지"를 판정하지는 않는다.
+    for i in 1..docs.len() {
+        let d_score_round = history[i].total - history[i - 1].total;
+        if d_score_round <= 0.0 {
+            continue; // 점수가 오르지 않았다면 "점수만 오른" 케이스가 아니므로 대상 아님
+        }
+        let sim = jaccard_similarity(&docs[i - 1], &docs[i]);
+        // 임계값 0.3: ASO 필드는 스토어 글자수 상한으로 길이가 짧게 제약돼 있어, 문장을
+        // 일부 다듬는 정상적인 재작성도 공통 토큰(조사·핵심 키워드 등)을 상당수 유지하는
+        // 경향이 있다. 자카드 유사도가 0.3 미만이면 "표현을 다듬음" 수준을 넘어 사실상
+        // 별개 문서로 교체된 것으로 보고 경고한다(엄밀한 통계적 근거는 없음 — 보수적으로 잡은 값).
+        if sim < 0.3 {
+            warnings.push(format!(
+                "드리프트 경고: iter{:02}→iter{:02} 점수는 {:+.1}점 올랐지만 토큰 자카드 유사도 {:.2} \
+                 (0.3 미만) → 내용이 급격히 바뀌었는데 점수만 오른 것일 수 있음, 실제 카피 확인 권장",
+                i, i + 1, d_score_round, sim
+            ));
+        }
+    }
+
     Ok(LoopOutcome { best_label: best_score.label.clone(), best_doc, first_doc: docs[0].clone(), best_score, history, stop_reason, warnings })
+}
+
+/// 공백 기준 토큰 집합의 자카드 유사도(교집합/합집합 크기 비율). 외부 크레이트 추가 없이
+/// 직접 구현 — 형태소 분석이 아니라 단순 토큰 집합 비교라 근사치다.
+fn jaccard_similarity(a: &str, b: &str) -> f64 {
+    let ta: std::collections::HashSet<&str> = a.split_whitespace().collect();
+    let tb: std::collections::HashSet<&str> = b.split_whitespace().collect();
+    if ta.is_empty() && tb.is_empty() {
+        return 1.0;
+    }
+    let inter = ta.intersection(&tb).count();
+    let union = ta.union(&tb).count();
+    if union == 0 {
+        1.0
+    } else {
+        inter as f64 / union as f64
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::jaccard_similarity;
+
+    #[test]
+    fn jaccard_similarity_identical_is_one() {
+        assert_eq!(jaccard_similarity("가계부 지출관리 앱", "가계부 지출관리 앱"), 1.0);
+    }
+
+    #[test]
+    fn jaccard_similarity_disjoint_is_zero() {
+        assert_eq!(jaccard_similarity("가계부 지출관리", "완전히 다른 문서"), 0.0);
+    }
+
+    #[test]
+    fn jaccard_similarity_partial_overlap() {
+        // {가계부, 지출관리, 앱} vs {가계부, 지출관리, 완전판} → 교집합 2, 합집합 4
+        let sim = jaccard_similarity("가계부 지출관리 앱", "가계부 지출관리 완전판");
+        assert!((sim - 0.5).abs() < 1e-9, "{sim}");
+    }
 }

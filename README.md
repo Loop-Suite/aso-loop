@@ -119,9 +119,13 @@ The prompt is passed over stdin; writing stdin and reading stdout/stderr happen 
 
 3. **Aggregation**: `--rounds N` rounds → cycling models/lenses → trimmed mean per criterion (n≥4 drops min & max) → weighted sum.
 4. **Instability signal**: per-criterion score spread (±) is shown in the report.
-5. **Held-out gate** (`--gate-model`): a model that never participated in the loop re-scores only the first and best drafts. If the loop score rose but the held-out score didn't, it's flagged as scorer optimization (reward hacking).
+5. **Held-out gate** (`--gate-model`): a model that never participated in the loop re-scores only the first and best drafts. If the loop score rose but the held-out score didn't track it (less than ~1/3 of the loop's gain), it's flagged as **scorer disagreement — a gain not reproduced by a different proxy**.
 
 de-anchoring, trimmed mean, held-out gate, length canary, etc. follow the same rationale (with citations) documented in bizplan-loop's `DESIGN.md`.
+
+### Limits of the held-out gate
+
+The held-out gate model is itself just another LLM judge, not a ground truth. Gao, Schulman & Hilton, ["Scaling Laws for Reward Model Overoptimization"](https://arxiv.org/abs/2210.10760) (OpenAI, ICML 2023, arXiv:2210.10760), show that optimizing a policy against a *proxy* reward model diverges from a *gold* reward model past some point — the gold score plateaus or reverses while the proxy score keeps climbing. That's the prototype of what this held-out gate is trying to detect: it approximates "gold vs. proxy" as "loop-participating judge (proxy) vs. non-participating judge (gate)." But aso-loop's gate model was never designed or validated to represent a gold/ground-truth preference the way Gao et al.'s synthetic gold RM was — it's simply a second proxy. Laidlaw, Singhal & Dragan, ["Correlated Proxies: A New Definition and Improved Mitigation for Reward Hacking"](https://arxiv.org/abs/2403.03185) (UC Berkeley, ICLR 2025, arXiv:2403.03185), formalize reward hacking as the correlation between a proxy and the *true* reward collapsing under optimization — which requires access to the true reward to measure directly. This CLI has no such access. So when the loop score rises but the gate score doesn't follow, the honest reading is **"a gain not reproduced by a different proxy,"** not **"proof that actual copy quality dropped."** Treat it as a prompt to look at the copy yourself, not as a verdict.
 
 ## Spec (`specs/*.toml`)
 
@@ -182,6 +186,18 @@ Findings CONFIRMED by a review-panel pass (functionality/good_things/tests lense
 - If a judge model never returns a score for some criterion id, that's now flagged as a warning instead of being silently treated as zero.
 - A panicking worker thread in parallel execution no longer propagates the panic to the whole process.
 - Fixed a test that claimed to verify `banned_term` detection but never actually exercised it, and added boundary-value (character count exactly at the limit) and case-normalization tests.
+
+## 리서치 기반 개선 반영 (2026-08-01)
+
+`docs/research-and-evidence-survey-2026-08-01.md` §5 백로그 중 3건을 구현했다:
+
+1. **[P1] held-out 게이트 경고 문구 정정.** `report.rs::write_loop_report`의 "채점자 최적화(reward hacking) 의심" 문구를 "채점자 간 불일치(다른 프록시로는 재현되지 않는 개선)"로 완화하고 Gao et al.(arXiv:2210.10760)/Laidlaw et al.(arXiv:2403.03185) 인용을 추가했다 — 위 "Limits of the held-out gate" 절 참고.
+2. **[P2] 브리프-카피 사실정합성 검사.** `checks.rs::factual_claim_issues`가 카피에서 정량적/사실적 주장(숫자+단위, 순위, "다운로드"/"수상"/"최초"/"업계 유일"/"공식")을 정규식으로 1차 추출해 `--brief` 원문에 등장하는지 대조한다(단순 포함 검사, LLM 판정 아님). `gen`/`loop` 모드는 brief를 넘기고, `score` 모드는 brief가 없어 이 검사를 건너뛴다.
+3. **[P2] 회차 간 드리프트 지표.** `loop_run.rs::jaccard_similarity`가 이전 회차 대비 현재 회차 문서의 토큰 자카드 유사도(외부 크레이트 없이 공백 토큰 집합 교집합/합집합)를 계산해, 점수는 올랐는데 유사도가 0.3 미만이면("사실상 별개 문서로 교체") 경고한다. 길이 canary와는 독립적인 체크다.
+
+스킵한 항목(§5의 나머지):
+- **[P3] Apple 공식 문서 원문 확보** — JS 렌더링 페이지라 WebFetch로 정적 콘텐츠를 가져올 수 없음. 브라우저 자동화 도구가 필요해 이 CLI(순수 Rust 백엔드 로직)의 범위 밖.
+- **[P3] 상용 도구(Atlas AI, Jenova AI) 블랙박스 벤치마크** — closed-source 제품에 실제로 브리프를 넣어 산출물을 비교하는 수동 리서치 작업이라 코드 구현 대상이 아님.
 
 ## Judgment calls made while scaffolding
 

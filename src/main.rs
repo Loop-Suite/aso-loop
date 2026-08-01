@@ -178,7 +178,7 @@ fn real_main() -> Result<()> {
                 println!("출력: {}  (누적 ${:.4})", out_dir.display(), llm::total_cost_usd());
                 return Ok(());
             }
-            let scored = score_many(&judges, &sp, docs, *rounds, *concurrency, &out_dir);
+            let scored = score_many(&judges, &sp, docs, *rounds, *concurrency, &out_dir, Some(&brief_text));
             finish(&out_dir, &sp, &scored)
         }
 
@@ -194,7 +194,8 @@ fn real_main() -> Result<()> {
                 let label = f.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| f.display().to_string());
                 docs.push((label, read_text(&f)?));
             }
-            let scored = score_many(&judges, &sp, docs, *rounds, *concurrency, &out_dir);
+            // score 모드는 --brief가 없어 대조할 원문이 없으므로 사실정합성 검사는 건너뛴다.
+            let scored = score_many(&judges, &sp, docs, *rounds, *concurrency, &out_dir, None);
             finish(&out_dir, &sp, &scored)
         }
 
@@ -212,8 +213,8 @@ fn real_main() -> Result<()> {
             if let Some(gm) = gate_model {
                 println!("held-out 검증 ({gm})…");
                 let g = vec![build_llm(&cli, Some(gm.clone()))];
-                let f = score::score_doc(&g, &sp, "gate-first", &r.first_doc, 1)?;
-                let b = score::score_doc(&g, &sp, "gate-best", &r.best_doc, 1)?;
+                let f = score::score_doc(&g, &sp, "gate-first", &r.first_doc, 1, Some(&brief_text))?;
+                let b = score::score_doc(&g, &sp, "gate-best", &r.best_doc, 1, Some(&brief_text))?;
                 println!("  최초본 {:.1} → 최고본 {:.1} (held-out)", f.total, b.total);
                 gate_pair = Some((f, b));
             }
@@ -245,10 +246,10 @@ fn finish(out_dir: &Path, sp: &Spec, scored: &[Scored]) -> Result<()> {
     Ok(())
 }
 
-fn score_many(judges: &[Llm], sp: &Spec, docs: Vec<(String, String)>, rounds: usize, concurrency: usize, out_dir: &Path) -> Vec<Scored> {
+fn score_many(judges: &[Llm], sp: &Spec, docs: Vec<(String, String)>, rounds: usize, concurrency: usize, out_dir: &Path, brief: Option<&str>) -> Vec<Scored> {
     let requested = docs.len();
     let (scored, failed) = par_map(concurrency, docs, |(label, doc)| {
-        let s = score::score_doc(judges, sp, &label, &doc, rounds)?;
+        let s = score::score_doc(judges, sp, &label, &doc, rounds, brief)?;
         println!("  채점 완료: {} — {:.1}/100", s.label, s.total);
         Ok(s)
     });

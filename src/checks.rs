@@ -225,6 +225,53 @@ fn banned_hits(spec: &Spec, text: &str) -> Vec<String> {
     hits
 }
 
+/// 카피에서 정량적/사실적 주장을 1차 정규식 필터링(Loki의 check-worthiness 식별 단계 응용).
+/// LLM 판정이 아니라 패턴 매치이므로 과다탐지(예: "공식"이 다른 맥락에서 쓰인 경우)가
+/// 있을 수 있다 — 사람이 최종 판단하는 참고용 신호다.
+fn default_claim_patterns() -> &'static [&'static str] {
+    &[
+        r"\d[\d,]*\s*(만|천|억)?\s*\+",  // "10만+", "50,000+" 류 수치 주장
+        r"\d+\s*위",                      // "1위" 류 순위 주장
+        r"다운로드",
+        r"수상",
+        r"최초",
+        r"업계\s*유일",
+        r"공식",
+    ]
+}
+
+/// 브리프-카피 사실정합성 1차 검사(FacTool/Loki 응용).
+/// 카피에서 정량적/사실적 주장 패턴을 추출해, 그 표현이 `--brief` 원문에도
+/// 등장하는지 단순 포함 여부로 대조한다(LLM 판정 아님). 브리프에 없는 주장은
+/// 근거 없이 지어냈을 가능성이 있어 경고로 남긴다.
+/// `brief`가 없으면(예: `score` 모드) 대조 대상이 없으므로 검사를 건너뛴다.
+pub fn factual_claim_issues(doc: &str, brief: Option<&str>) -> Vec<String> {
+    let brief = match brief {
+        Some(b) if !b.trim().is_empty() => b,
+        _ => return Vec::new(),
+    };
+    static CLAIM_RE: OnceLock<Vec<Regex>> = OnceLock::new();
+    let res = CLAIM_RE.get_or_init(|| compile_all(default_claim_patterns()));
+
+    let mut issues = Vec::new();
+    let mut seen = HashSet::new();
+    for re in res {
+        for m in re.find_iter(doc) {
+            let claim = m.as_str().trim().to_string();
+            if claim.is_empty() || !seen.insert(claim.clone()) {
+                continue;
+            }
+            if !brief.contains(&claim) {
+                issues.push(format!(
+                    "[사실정합성] 브리프에 없는 주장: \"{}\" → 브리프 원문에 근거가 없으면 카피에서 제거하거나 브리프에 근거를 추가할 것",
+                    claim
+                ));
+            }
+        }
+    }
+    issues
+}
+
 pub fn missing_required(spec: &Spec, doc: &str) -> Vec<String> {
     let bodies = field_bodies(spec, doc);
     spec.sections
@@ -235,7 +282,8 @@ pub fn missing_required(spec: &Spec, doc: &str) -> Vec<String> {
 }
 
 /// 형식·분량·키워드·금지어 관련 결정론적 지적 사항.
-pub fn format_issues(spec: &Spec, doc: &str) -> Vec<String> {
+/// `brief`가 있으면(gen/loop 모드) 브리프-카피 사실정합성 검사도 함께 수행한다.
+pub fn format_issues(spec: &Spec, doc: &str, brief: Option<&str>) -> Vec<String> {
     let mut issues: Vec<String> = Vec::new();
     let bodies = field_bodies(spec, doc);
 
@@ -305,6 +353,8 @@ pub fn format_issues(spec: &Spec, doc: &str) -> Vec<String> {
         issues.push(format!("금지 표현 감지 — {} → 표현 교체 필요(상표권·과장광고 리스크)", h));
     }
 
+    issues.extend(factual_claim_issues(doc, brief));
+
     issues
 }
 
@@ -349,7 +399,7 @@ mod tests {
         let spec = test_spec();
         // title 10자 초과, subtitle 누락, 키워드 1개만 반영, 뱅크샐러드 금지어 포함
         let doc = "## Title\n가계부 지출관리 완전정복판\n";
-        let issues = format_issues(&spec, doc);
+        let issues = format_issues(&spec, doc, None);
         assert!(issues.iter().any(|i| i.contains("Title") && i.contains("초과")));
         assert!(issues.iter().any(|i| i.contains("Subtitle") && i.contains("누락")));
     }
@@ -358,7 +408,7 @@ mod tests {
     fn format_issues_flags_duplicate_keyword() {
         let spec = test_spec();
         let doc = "## Title\n가계부\n## Subtitle\n가계부 앱\n";
-        let issues = format_issues(&spec, doc);
+        let issues = format_issues(&spec, doc, None);
         assert!(issues.iter().any(|i| i.contains("중복")));
     }
 
@@ -366,7 +416,7 @@ mod tests {
     fn format_issues_flags_banned_term() {
         let spec = test_spec();
         let doc = "## Title\n뱅크샐러드 대비 더 쉬운 가계부\n## Subtitle\n간편 가계부\n";
-        let issues = format_issues(&spec, doc);
+        let issues = format_issues(&spec, doc, None);
         assert!(issues.iter().any(|i| i.contains("금지 표현") && i.contains("뱅크샐러드")), "{issues:?}");
     }
 
@@ -376,14 +426,36 @@ mod tests {
     }
 
     #[test]
+    fn factual_claim_issues_flags_claim_absent_from_brief() {
+        let doc = "## Title\n가계부\n## Subtitle\n누적 10만+ 다운로드 달성\n";
+        let brief = "간편한 가계부 앱. 지출을 자동으로 분류해준다.";
+        let issues = factual_claim_issues(doc, Some(brief));
+        assert!(issues.iter().any(|i| i.contains("사실정합성") && i.contains("10만")), "{issues:?}");
+    }
+
+    #[test]
+    fn factual_claim_issues_passes_when_claim_present_in_brief() {
+        let doc = "## Title\n가계부\n## Subtitle\n누적 10만+ 다운로드 달성\n";
+        let brief = "이 앱은 누적 10만+ 다운로드를 기록한 인기 가계부 앱이다.";
+        let issues = factual_claim_issues(doc, Some(brief));
+        assert!(issues.is_empty(), "{issues:?}");
+    }
+
+    #[test]
+    fn factual_claim_issues_skipped_without_brief() {
+        let doc = "## Title\n가계부\n## Subtitle\n누적 10만+ 다운로드 달성\n";
+        assert!(factual_claim_issues(doc, None).is_empty());
+    }
+
+    #[test]
     fn format_issues_boundary_exact_max_chars_ok_but_plus_one_fails() {
         let spec = test_spec(); // title max_chars = 10
         let ok_doc = "## Title\n1234567890\n## Subtitle\n가나\n"; // 정확히 10자
-        let issues_ok = format_issues(&spec, ok_doc);
+        let issues_ok = format_issues(&spec, ok_doc, None);
         assert!(!issues_ok.iter().any(|i| i.contains("Title") && i.contains("초과")), "{issues_ok:?}");
 
         let over_doc = "## Title\n12345678901\n## Subtitle\n가나\n"; // 11자
-        let issues_over = format_issues(&spec, over_doc);
+        let issues_over = format_issues(&spec, over_doc, None);
         assert!(issues_over.iter().any(|i| i.contains("Title") && i.contains("초과")), "{issues_over:?}");
     }
 

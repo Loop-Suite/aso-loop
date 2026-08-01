@@ -147,7 +147,8 @@ fn trimmed_mean(v: &[f64]) -> f64 {
 }
 
 /// 문서 1건 채점. rounds 회 반복하며 모델·관점을 순환한다.
-pub fn score_doc(judges: &[Llm], spec: &Spec, label: &str, doc: &str, rounds: usize) -> Result<Scored> {
+/// `brief`는 브리프-카피 사실정합성 검사용(gen/loop 모드는 Some, score 모드는 None).
+pub fn score_doc(judges: &[Llm], spec: &Spec, label: &str, doc: &str, rounds: usize, brief: Option<&str>) -> Result<Scored> {
     anyhow::ensure!(!judges.is_empty(), "채점 모델 없음");
     let rounds = rounds.max(1);
     let schema = judge_schema(spec);
@@ -179,7 +180,7 @@ pub fn score_doc(judges: &[Llm], spec: &Spec, label: &str, doc: &str, rounds: us
     let wsum = spec.weight_sum();
     let total: f64 = spec.criteria.iter().map(|c| per_criterion.get(&c.id).copied().unwrap_or(0.0) * (c.weight / wsum)).sum();
 
-    let format_issues = checks::format_issues(spec, doc);
+    let format_issues = checks::format_issues(spec, doc, brief);
     let missing = checks::missing_required(spec, doc);
 
     // 심사위원이 특정 criterion id를 한 번도 반환하지 않으면(스키마상 막지 못함)
